@@ -1,0 +1,57 @@
+ForceField {
+
+  write_once("In Init") {
+    units           real
+    atom_style      full
+    bond_style      harmonic
+    angle_style     harmonic
+    dihedral_style  charmm
+    pair_style      lj/cut 11.0
+    pair_modify     mix arithmetic
+    special_bonds   lj 0.0 0.0 0.0
+  }
+
+  write_once("Data Masses") {
+    @atom:CA   13.0
+    @atom:SR   50.0
+    @atom:LR   50.0
+  }
+
+  write_once("In Settings") {
+    pair_coeff  @atom:CA  @atom:CA      0.10 2.0
+    pair_coeff  @atom:SR  @atom:SR      3.00 2.0
+    pair_coeff  @atom:LR  @atom:LR      3.00 6.0
+  }
+
+  write_once("Data Bonds By Type") {
+    @bond:Backbone   @atom:CA @atom:CA
+    @bond:Sidechain  @atom:CA @atom:SR
+    @bond:Sidechain  @atom:CA @atom:LR
+  }
+
+  write_once("In Settings") {
+    bond_coeff     @bond:Sidechain   30.0   3.4
+    bond_coeff     @bond:Backbone    30.0   3.7
+  }
+
+  write_once("Data Angles By Type") {
+    @angle:Backbone  @atom:CA @atom:CA  @atom:CA
+    @angle:Sidechain @atom:CA @atom:CA  @atom:*R
+  }
+
+  write_once("Data Dihedrals By Type") {
+    @dihedral:CCCC @atom:CA  @atom:CA @atom:CA @atom:CA
+    @dihedral:RCCR @atom:*R  @atom:CA @atom:CA @atom:*R
+  }
+
+  write_once("In Settings") {
+    angle_coeff @angle:Backbone    30.00  114
+    angle_coeff @angle:Sidechain   30.00  123
+  }
+
+  write_once("In Settings") {
+    dihedral_coeff  @dihedral:CCCC    -0.5 1 -180 0.0
+    dihedral_coeff  @dihedral:RCCR    -1.5 1 -180 0.0
+  }
+
+}

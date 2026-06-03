@@ -1,0 +1,15 @@
+import "polymer.lt"
+
+write_once("Data Boundary") {
+  0 120.0 xlo xhi
+  0 60.0 ylo yhi
+  0 60.0 zlo zhi
+}
+
+polymers = new Polymer [2].move(60.0, 0, 0)
+                       [2].move(0, 30.0, 0)
+                       [2].move(0, 0, 30.0)
+
+#polymers[1][*][*].move(0,0,20)
+#polymers[*][1][*].move(80,0,0)
+#olymers[*][*][1].move(0,80,0)
