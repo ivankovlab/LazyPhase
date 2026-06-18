@@ -3,6 +3,21 @@ LazyPhase
 
 <img src="logo.jpg" height=80>
 
+### Introduction
+
+LazyPhase is a Moltemplate- and LAMMPS-based tool for high-throughput
+simulations of phase behavior of polypeptide-like polymers. A user can specify
+the alphabet of side chains, their sizes and interactions.
+
+### Dependencies
+
+Python
+Moltemplate
+LAMMPS
+Optional: Kokkos or other GPU interface
+
+### Guide
+
 For help:
 ```
 lazyphase --help
@@ -10,33 +25,17 @@ lazyphase --help
 
 Generating the sequences and preparing the high-throughput simulations:
 ```
-lazyphase generate --alphabet SL --length 64 --num 100
+lazyphase generate --alphabet SL --length 64 --num 100 --output seqs.txt
 ```
 
-#### Images
+Run the high-throughput simulations:
+```
+lazyphase run --seqs seqs.txt --time 1
+```
+--seqs specifies the file containing the sequences, each in separate line, and
+--time is the modeling time in microseconds.
 
-<img src="images/monomer_H.png" height=70> <img src="images/plus.svg" height=80>
-<img src="images/monomer_P.png" height=70> <img src="images/rightarrow.svg" height=80>
-<img src="images/polymer_LR.png" width=180> <img src="images/rightarrow.svg" height=80>
+### Copyright and citation
 
-<img src="images/trajectory.png" width=650>
-
-This directory contains an example of a coarse-grained (vaguely protein-like)
-heteropolymer consisting of 14 residues, each of which has 2 particles
-(one backbone bead, CA, one residue bead, R).
-There are 27 copies of this polymer in the simulation.
-
-There are two types of residues, H and P.
-The sidechain beads from the H residue
-are attracted to each other ("HR", orange).
-All other particles are repulsive.
-
-### Instructions
-Instructions on how to build LAMMPS input files and run a short simulation are provided in other README files.
-
-#### Step 1) README_setup.sh
-This file explains how to use moltemplate.sh to build the files that LAMMPS
-needs.
-
-#### Step 2) README_run.sh
-This file explains how to use LAMMPS to run a simulation using the files you created in step 1.
+(C) Egor Vasilenko, Ivankov Lab.
+If use, please cite:
