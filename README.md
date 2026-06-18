@@ -1,6 +1,18 @@
 LazyPhase
 ====================
 
+<img src="images/logo.png" height=80>
+
+For help:
+```
+lazyphase --help
+```
+
+Generating the sequences and preparing the high-throughput simulations:
+```
+lazyphase generate --alphabet SL --length 64 --num 100
+```
+
 #### Images
 
 <img src="images/monomer_H.png" height=70> <img src="images/plus.svg" height=80>
