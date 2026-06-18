@@ -1,7 +1,7 @@
 LazyPhase
 ====================
 
-<img src="images/logo.png" height=80>
+<img src="logo.jpg" height=80>
 
 For help:
 ```
