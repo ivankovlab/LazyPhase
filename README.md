@@ -11,9 +11,9 @@ the alphabet of side chains, their sizes and interactions.
 
 ### Dependencies
 
-Python
-Moltemplate
-LAMMPS
+[Python](https://www.python.org)\
+[Moltemplate](https://github.com/jewettaij/moltemplate)\
+[LAMMPS](https://docs.lammps.org)\
 Optional: Kokkos or other GPU interface
 
 ### Guide
