@@ -3,7 +3,7 @@ read_data system.data
 include system.in.settings
 
 timestep 2.0  # 2 femtoseconds.
-dump     1 all custom 5000 output/SLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSL_1.lammpstrj id mol type x y z ix iy iz
+dump     1 all custom 5000 output/NAME.lammpstrj id mol type x y z ix iy iz
 
 fix fxlan all langevin 310.15 310.15 1000.0 2026  # Friction frequency 1 / ps.
 fix fxnve all nve
@@ -20,4 +20,4 @@ unfix trap
 
 run 2000000  # Equilibrate the pre-formed condensate.
 
-write_data output/SLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSLSL_1.data
+write_data output/NAME.data

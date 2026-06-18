@@ -13,6 +13,7 @@ In VMD terminal:
         Somteimes needed:
         pbc unwrap
         pbc wrap
+        pbc set {a b c}
     Repeat until all clusters will be connected.
 
     (3) > set sel [atomselect top all]

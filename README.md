@@ -1,4 +1,4 @@
-2-bead Heteropolymer Example
+LazyPhase
 ====================
 
 #### Images
@@ -9,7 +9,7 @@
 
 <img src="images/trajectory.png" width=650>
 
-This directory contains an example of a couarse-grained (vaguely protein-like)
+This directory contains an example of a coarse-grained (vaguely protein-like)
 heteropolymer consisting of 14 residues, each of which has 2 particles
 (one backbone bead, CA, one residue bead, R).
 There are 27 copies of this polymer in the simulation.
@@ -19,15 +19,12 @@ The sidechain beads from the H residue
 are attracted to each other ("HR", orange).
 All other particles are repulsive.
 
-### Instructions 
-Instructions on how to build LAMMPS input files and
-run a short simulation are provided in other README files.
+### Instructions
+Instructions on how to build LAMMPS input files and run a short simulation are provided in other README files.
 
 #### Step 1) README_setup.sh
-This file explains how to use moltemplate.sh to build the files that
-LAMMPS needs.
+This file explains how to use moltemplate.sh to build the files that LAMMPS
+needs.
 
 #### Step 2) README_run.sh
-This file explains how to use LAMMPS to run a simulation using the
-files you created in step 1.
-
+This file explains how to use LAMMPS to run a simulation using the files you created in step 1.
