@@ -1,23 +1,31 @@
 include system.in.init
-read_data system.data
 include system.in.settings
+read_data system.data
 
-timestep 2.0  # 2 femtoseconds.
-dump     1 all custom 5000 output/NAME.lammpstrj id mol type x y z ix iy iz
-
-fix fxlan all langevin 310.15 310.15 1000.0 2026  # Friction frequency 1 / ps.
+timestep DT  # 2 femtoseconds.
+# 2.0
+dump 1 all custom LOG_STEPS output/SEQUENCE.lammpstrj id mol type x y z ix iy iz
+# 5000
+# Friction frequency 1 / ps.
+fix fxlan all langevin TEMPERATURE TEMPERATURE DAMPING_TIME SEED
+# 310.15
+# 1000.0
+# 2026
 fix fxnve all nve
 
-thermo       5000
+thermo LOG_STEPS
 
-run 100000  # Perform free sampling to produce random monomers in solution.
+run SOLUTION_TIME  # Perform free sampling to produce random monomers in solution.
+# 100000
+fix trap all drag HALF_CELL_SIZE HALF_CELL_SIZE HALF_CELL_SIZE TRAP_FORCE RADIUS
+# 312.0 312.0 312.0
+# 0.1
+# 100.0
 
-fix trap all drag 312.0 312.0 312.0 0.1 100.0
-
-run 200000  # Drag to the "optical trap".
-
+run TRAP_TIME  # Drag to the "optical trap".
+# 200000
 unfix trap
 
-run 2000000  # Equilibrate the pre-formed condensate.
-
-write_data output/NAME.data
+run RELAXATION_TIME  # Equilibrate the pre-formed condensate.
+# 2000000
+write_data output/SEQUENCE.data

@@ -1,0 +1,14 @@
+import "forcefield.lt"
+
+S inherits ForceField {
+
+  write("Data Atoms") {
+    $atom:ca $mol:... @atom:CA 0.0 0.0 0.5 0.0
+    $atom:r  $mol:... @atom:SR 0.0 0.0 2.5 0.0
+  }
+
+  write("Data Bond List") {
+    $bond:cr $atom:ca $atom:r
+  }
+
+}
