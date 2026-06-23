@@ -49,10 +49,18 @@ def get_condensate_radius(N: int, c: int, b: float) -> float:
 
 def generate_substituted_file(path_in: str, path_out: str,
                               substitutions: list):
-    """Substitute all paterns.
-    path_in : str
-    path_out : str
-    substitutions : list
+    """Substitute all patterns in the template file and write the resulting
+       specifications file.
+
+    :param path_in: Path to the input template file.
+    :type path_in: str
+    :param path_out: Path for the output specifications file.
+    :type path_out: str
+    :param substitutions: A list of substitution pairs, each expressed
+        as a tuple of the form ``('pattern', 'word')``.
+    :type substitutions: list
+    :return: ``None``.
+    :rtype: NoneType
     """
 
     file_in = open(path_in, 'r')

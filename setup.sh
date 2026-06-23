@@ -14,4 +14,4 @@ cd $DIR
   rm run.in.EXAMPLE
 
 # Return to the initial user path.
-cd current_dir
+cd $current_dir
