@@ -15,24 +15,56 @@ Contact: dist < 2 * (2^(1/6)*r_i + 2^(1/6)*r_j).
 """
 
 
-import sys
 import math
 import argparse
 from random import shuffle
 import numpy as np
 from pathlib import Path
+import run_condensates_throughput
+import os
 
 
-# Radii for each type (type 1, 2, 3)
-RADII = {1: 2.0, 2: 2.0, 3: 6.0}
+# Pre-calculate the sixth root of two for dipole-dipole attractions, also known
+# as dispersion forces.
 SIXTH_ROOT_OF_TWO = 2.0 ** (1.0 / 6.0)
 
 
-def generate_substituted_file(path_in, path_out, pattern, substit):
+def get_condensate_radius(N: int, c: int, b: float) -> float:
+    """Compute the radius of the trapped condensate.
+
+    :param N: Number of monomers in a single polymer.
+    :type N: int
+    :param c: Number of polymers along one edge of the cubic lattice;
+        the system therefore contains :math:`c^3` polymers in total.
+    :type c: int
+    :param b: Side length of a cube that approximates the size of
+        an individual monomer.
+    :type b: float
+    :return: Radius of the trapped condensate.
+    :rtype: float
+    """
+
+    return (3 / 4 / math.pi * N)**(1/3) * c * b
+
+
+def generate_substituted_file(path_in: str, path_out: str,
+                              substitutions: list):
+    """Substitute all paterns.
+    path_in : str
+    path_out : str
+    substitutions : list
+    """
+
     file_in = open(path_in, 'r')
     file_out = open(path_out, 'w')
+
     for line in file_in:
-        file_out.write(line.replace(pattern, substit))
+        line_specified = line
+        for pair in substitutions:
+            pattern, substitution = pair[0], pair[1]
+            line_specified = line_specified.replace(pattern, substitution)
+        file_out.write(line_specified)
+
     file_in.close()
     file_out.close()
 
@@ -278,29 +310,100 @@ def generate_sequences(args):
 
 
 def prepare(args):
+    """Prepare the target run settings in the local template.run.in.nvt file."""
+
     print('Preparing...')
 
     dir = args.dir
     if dir[-1] != '/':
         dir += '/'
 
+    # Read sequences of the polypeptides that will be simulated.
+    seqs_file = open(dir + 'seqs.txt', 'r')
+    seqs = seqs_file.readlines()
+    seqs_file.close()
+
+    # Collect all lengths of the sequences. Verify that the length is the same.
+    seqs_lens = set([len(seq[:-1]) for seq in seqs])
+    print(len(seqs), 'sequences in ' + dir + 'seqs.txt.')
+
+    if len(seqs_lens) > 1:
+        print('The sequences must be of the same length. Terminate.')
+        return
+
+    N = seqs_lens.pop()
+    print('All sequences are', N, 'residues long.')
+
+    # Convert all arguments to the appropriate units.
+    dt                      = str(args.dt)
+    repeats                 = str(args.repeats)
+    solution_steps          = str(round(args.solution_time * 10**9 / args.dt))
+    trap_steps              = str(round(args.trap_time * 10**9 / args.dt))
+    relaxation_steps        = str(round(args.relaxation_time * 10**9 / args.dt))
+    temperature             = str(args.temperature)
+    row                     = args.row
+    log_steps               = str(args.log_steps)
+    damping_time            = str(args.damping_time)
+    seed                    = str(args.seed)
+    trap_force              = str(args.trap_force)
+    residue_radius_for_trap = args.residue_radius_for_trap
+
+    # Length of a delineated polymer along the main backbone axis.
+    polymer_length = (N - 1) * 3.2
+
+    # Define the cell boundaries for the simulation series.
+    cell_file = open(dir + 'cell.lt', 'w')
+    cell_file.write('write_once("Data Boundary") {\n')
+    # The subcells for the polymers are sized with paddings of roughly two
+    # monomer lengths.
+    cell_file.write('    0 ' + str(round((polymer_length + 6.4) * row, 1)) + \
+                    ' xlo xhi\n')
+    cell_file.write('    0 ' + str(round((polymer_length + 6.4) * row, 1)) + \
+                    ' ylo yhi\n')
+    cell_file.write('    0 ' + str(round((polymer_length + 6.4) * row, 1)) + \
+                    ' zlo zhi\n')
+    cell_file.write('}\n\n')
+    cell_file.close()
+
+    # Specify all parameters in the run settings file that are specific for the
+    # serie.
     substitutions = [
-        (, 'DT'),
-        (, 'LOG_STEPS'),
-        (, 'TEMPERATURE'),
-        (, 'DAMPING_TIME')
+        ('DT', dt),
+        ('LOG_STEPS', log_steps),
+        ('TEMPERATURE', temperature),
+        ('DAMPING_TIME', damping_time),
+        ('SOLUTION_TIME', solution_steps),
+        ('TRAP_FORCE', trap_force),
+        ('TRAP_TIME', trap_steps),
+        ('RELAXATION_TIME', relaxation_steps),
+        (
+        'RADIUS',
+        str(round(get_condensate_radius(N, row, residue_radius_for_trap), 1))
+        ),
+        ('HALF_CELL_SIZE', str(round((polymer_length + 6.4) * row / 2, 1)))
     ]
 
     # Prepare simulations pipeline.
-    run_file = open(args.dir + 'template.run.in.nvt', 'w')
-    run_file.close()
+    local_template_path = dir + 'template.run.in.nvt'
 
-    return
+    # Prepare the template of running settings.
+    generate_substituted_file('template.run.in.nvt', local_template_path,
+                              substitutions)
+
+    # Create a directory for the outputs.
+    os.system('mkdir ' + dir + 'output')
 
 
 def run(args):
     print('Started the high-throughput condensate simulations...')
-    return
+
+    dir = args.dir
+    repeats = args.repeats
+    lmp = args.lmp
+
+    run_condensates_throughput.run_condensates_throughput(dir, lmp, repeats)
+
+    print('The simulations finished.')
 
 
 def analyse(args):
@@ -337,12 +440,12 @@ if __name__ == '__main__':  # If run as CLI tool.
                 epilog='(C) Egor Vasilenko, 2026'
              )
 
-    # Add commands to the CLI tool.
+    # Add specific commands to the CLI tool.
     subparsers = parser.add_subparsers()
 
-    #####################################
-    # Generate sequences for screening. #
-    #####################################
+    ################################################
+    # Command to generate sequences for screening. #
+    ################################################
 
     parser_generate_sequences = subparsers.add_parser(
         "generate_sequences",
@@ -368,7 +471,8 @@ if __name__ == '__main__':  # If run as CLI tool.
     parser_generate_sequences.set_defaults(func=generate_sequences)
 
     #########################################################################
-    # Prepare the simulations for the sequences generated on previous step. #
+    # Command to prepare the simulations for the sequences generated on     #
+    # previous step.                                                        #
     #########################################################################
 
     parser_prepare = subparsers.add_parser(
@@ -387,23 +491,29 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_prepare.add_argument(
-        "--solution_time", type=float, default=0.0001,
-        help="Solution simulation time in microseconds. Default=0.0001."
+        "--solution_time", type=float, default=0.01,
+        help="Solution simulation time in microseconds. Default=0.01."
     )
 
     parser_prepare.add_argument(
-        "--trap_time", type=float, default=0.0002,
-        help="Trap simulation time in microseconds. Default=0.0002."
+        "--trap_time", type=float, default=0.01,
+        help="Trap simulation time in microseconds. Default=0.01."
     )
 
     parser_prepare.add_argument(
-        "--relaxation_time", type=float, default=1.0,
-        help="Condensate simulation time in microseconds. Default=1."
+        "--relaxation_time", type=float, default=0.01,
+        help="Condensate simulation time in microseconds. Default=0.01."
     )
 
     parser_prepare.add_argument(
-        "--dt", type=float, default=2.0,
-        help="Simulation time step in femtoseconds. Default=2."
+        "--damping_time", type=int, default=100,
+        help="""Damping time of Langevin thermostat in picoseconds.
+                Default=0.1."""
+    )
+
+    parser_prepare.add_argument(
+        "--dt", type=float, default=10.0,
+        help="Simulation time step in femtoseconds. Default=10."
     )
 
     parser_prepare.add_argument(
@@ -418,15 +528,9 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_prepare.add_argument(
-        "--log_steps", type=int, default=5000,
+        "--log_steps", type=int, default=10000,
         help="""Number of steps to make next record into the log and trajectory.
-                Default=5000."""
-    )
-
-    parser_prepare.add_argument(
-        "--damping_time", type=int, default=1000,
-        help="""Damping time of Langevin thermostat in picoseconds.
-                Default=1000."""
+                Default=10000."""
     )
 
     parser_prepare.add_argument(
@@ -440,16 +544,17 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_prepare.add_argument(
-        "--residue_radius_for_trap", type=float, default=0.1,
+        "--residue_radius_for_trap", type=float, default=10,
         help="""Single residue effective radius from which the trap condensate
-                radius will be calculated."""
+                radius will be calculated [angstroms]."""
     )
 
     parser_prepare.set_defaults(func=prepare)
 
-    ########################################################################
-    # Run the simulations with settings defined on the previous two steps. #
-    ########################################################################
+    ############################################################################
+    # Command to run the simulations with settings defined on the previous two #
+    # steps.                                                                   #
+    ############################################################################
 
     parser_run = subparsers.add_parser(
         "run",
@@ -461,11 +566,24 @@ if __name__ == '__main__':  # If run as CLI tool.
         help="Directory path for the simulations."
     )
 
+    parser_run.add_argument(
+        "--repeats", type=int, default=3,
+        help="Number of repeats per sequence."
+    )
+
+    parser_run.add_argument(
+        "--lmp", type=str, default='lmp_mpi',
+        choices=['lmp', 'lmp_kokkos',
+                 'lmp_mpi', 'lmp_mpi_kokkos',
+                 'lmp_serial', 'lmp_serial_kokkos'],
+        help="Setup of LAMMPS run."
+    )
+
     parser_run.set_defaults(func=run)
 
-    ######################################
-    # Analyse the performed simulations. #
-    ######################################
+    #################################################
+    # Command to analyse the performed simulations. #
+    #################################################
 
     parser_analyse = subparsers.add_parser(
         "analyse",
@@ -478,38 +596,31 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_analyse.add_argument(
-        "--cluster", type=int,
+        "--cluster", type=bool, default=True,
         help="Clustering."
     )
 
     parser_analyse.add_argument(
-        "--gyration", type=int,
+        "--gyration", type=bool, default=True,
         help="Radius of gyration."
     )
 
     parser_analyse.add_argument(
-        "--contacts", type=int,
+        "--contacts", type=bool, default=True,
         help="Contact statistics."
     )
 
     parser.print_help()
+    #parser_generate_sequences.add_argument(
+    #    "-h", "--help",
+    #    action=lambda: parser_generate_sequences.print_help(), help="Show all help"
+    #)
+    #parser_prepare.print_help()
+    #parser_run.print_help()
+    #parser_analyse.print_help()
 
     # Parse the input and follow the commands.
     args = parser.parse_args()
     args.func(args)
 
     #exit(0)
-
-    #if len(sys.argv) != 2:
-    #    print("Usage: python count_contacts.py <pdb_file>")
-    #    sys.exit(1)
-
-    #pdb_file = sys.argv[1]
-    #atoms = parse_pdb(pdb_file)
-
-    #if not atoms:
-    #    print("No atoms of type 1, 2, or 3 found.")
-    #    sys.exit(1)
-
-    #contacts = count_contacts(atoms)
-    #print(f"Number of contacts between different types: {contacts}")

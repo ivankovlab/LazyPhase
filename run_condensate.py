@@ -3,13 +3,15 @@ Generate polypeptide-like chain in Moltemplate format and prepare the simulation
 cell for the condensate studies.
 '''
 
+
 import numpy as np
-from random import uniform
+from random import randint, uniform
 import os
 from LazyPhase import generate_substituted_file
+import subprocess
 
 
-def run_condensate(seq: str, num: int, c=3):
+def run_condensate(dir: str, lmp: str, seq: str, num: int, c=3):
     """Run condensate simulation for one sequence. Each run assumes creation
     of a new running protocol specific for the sequence and containing random
     seed. The polymers are placed randomly. One simulation will be run, the
@@ -19,6 +21,8 @@ def run_condensate(seq: str, num: int, c=3):
 
     seq : str
         Sequence of the polymer written as one-letter monomer names.
+    lmp : str
+        Specifications on LAMMPS launch.
     num : int
         Number of repeats for the sequence. Each repeat will be run with the
         same sequence, but newly generated seed.
@@ -30,11 +34,21 @@ def run_condensate(seq: str, num: int, c=3):
     # Generate input for the sequence to write all output will sequence name. #
     ###########################################################################
 
+    print('ROWS', c)
+
+    # Number of residues in the polymer.
+    N = len(seq)
+
+    # Length of a delineated polymer along the main backbone axis.
+    polymer_length = (N - 1) * 3.2
+
     # Maximal seed value is taken as the maximal 32-bit integer.
     # The simulations of one serie differ only in sequence and seed.
-    generate_substituted_file('template.run.in.nvt', 'run.in.nvt',
-                              [('SEQUENCE', seq + '_' + str(num)),
-                               ('SEED', random.uniform(1, 2147483647))])
+    generate_substituted_file(dir + 'template.run.in.nvt', dir + 'run.in.nvt', [
+        ('SEQUENCE', seq + '_' + str(num)),
+        ('HALF_CELL_SIZE', str(round((polymer_length + 6.4) * c, 1) / 2)),
+        ('SEED', str(randint(1, 65535)))
+    ])
 
     ###############################################
     # Generate a template for the single polymer. #
@@ -70,7 +84,7 @@ def run_condensate(seq: str, num: int, c=3):
 
     output += '  }\n'
 
-    polymer_file = open('moltemplate_files/polymer.lt', 'w')
+    polymer_file = open(dir + 'polymer.lt', 'w')
     polymer_file.write('import "monomer_S.lt"\n')
     polymer_file.write('import "monomer_L.lt"\n')
     polymer_file.write('\n')
@@ -86,19 +100,10 @@ def run_condensate(seq: str, num: int, c=3):
     # Create the simulating cell and fill it with randomly oriented polymers. #
     ###########################################################################
 
-    # Length of a delineated polymer along the main backbone axis.
-    polymer_length = (len(seq) - 1) * 3.2
+    f = open(dir + 'system.lt', 'w')
 
-    f = open('moltemplate_files/system.lt', 'w')
-
-    f.write('import "polymer.lt"\n\n')
-    f.write('write_once("Data Boundary") {\n')
-    # The subcells for the polymers are sized with paddings of roughly two
-    # monomer lengths.
-    f.write('0 ' + str(round((polymer_length + 6.4) * c, 1)) + ' xlo xhi\n')
-    f.write('0 ' + str(round((polymer_length + 6.4) * c, 1)) + ' ylo yhi\n')
-    f.write('0 ' + str(round((polymer_length + 6.4) * c, 1)) + ' zlo zhi\n')
-    f.write('}\n\n')
+    f.write('import "polymer.lt"\n')
+    f.write('import "cell.lt"\n\n')
 
     polymer_num = 0  # Current polymer ID.
 
@@ -147,4 +152,8 @@ def run_condensate(seq: str, num: int, c=3):
     # Run the final system assembly and run the simulation. #
     #########################################################
 
-    os.system('./README_setup.sh && ./README_run.sh')
+    print('Make the final setup...')
+    subprocess.run(['bash', 'setup.sh', dir])
+
+    print('Run the simulation...')
+    subprocess.run(['bash', 'run.sh', dir, lmp])

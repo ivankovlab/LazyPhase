@@ -1,31 +1,38 @@
-include system.in.init
-include system.in.settings
-read_data system.data
+log output/SEQUENCE.lammps
 
-timestep DT  # 2 femtoseconds.
-# 2.0
+include system.in.init
+read_data system.data
+include system.in.settings
+
+# Time step [femtoseconds].
+timestep DT
+
+# How to save the trajectory.
 dump 1 all custom LOG_STEPS output/SEQUENCE.lammpstrj id mol type x y z ix iy iz
-# 5000
-# Friction frequency 1 / ps.
+
+# Friction frequency [1 / ps].
 fix fxlan all langevin TEMPERATURE TEMPERATURE DAMPING_TIME SEED
-# 310.15
-# 1000.0
-# 2026
+
+# Use NVE time integrator.
 fix fxnve all nve
 
+# Define logging frequency.
 thermo LOG_STEPS
 
-run SOLUTION_TIME  # Perform free sampling to produce random monomers in solution.
-# 100000
-fix trap all drag HALF_CELL_SIZE HALF_CELL_SIZE HALF_CELL_SIZE TRAP_FORCE RADIUS
-# 312.0 312.0 312.0
-# 0.1
-# 100.0
+# Perform free sampling to produce random monomers in solution.
+run SOLUTION_TIME
 
-run TRAP_TIME  # Drag to the "optical trap".
-# 200000
+# Create the "optical trap" in center of the cell.
+fix trap all drag HALF_CELL_SIZE HALF_CELL_SIZE HALF_CELL_SIZE TRAP_FORCE RADIUS
+
+# Drag to the "optical trap".
+run TRAP_TIME
+
+# Remove trap.
 unfix trap
 
-run RELAXATION_TIME  # Equilibrate the pre-formed condensate.
-# 2000000
+# Start relaxation to equilibrate the pre-formed condensate.
+run RELAXATION_TIME
+
+# Save the final structure separately.
 write_data output/SEQUENCE.data

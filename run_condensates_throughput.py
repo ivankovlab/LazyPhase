@@ -1,7 +1,7 @@
 import run_condensate
 
 
-def run_condensates_throughput(dir: str, repeats=3):
+def run_condensates_throughput(dir: str, lmp: str, repeats=3):
     """Run high-throughput condensate simulations for a set of sequences.
     repeats : int
         How many times to repeat the simulation for the single sequence.
@@ -11,7 +11,7 @@ def run_condensates_throughput(dir: str, repeats=3):
         dir += '/'
 
     try:
-        file_seqs = open('seqs.txt', 'r')
+        file_seqs = open(dir + 'seqs.txt', 'r')
         seqs = file_seqs.readlines()
         file_seqs.close()
     except:
@@ -36,7 +36,8 @@ def run_condensates_throughput(dir: str, repeats=3):
 
     for seq in seqs:
         for num in range(1, repeats+1):
-            run_condensate.run_condensate(seq, num)
+            print('Running one simulation...')
+            run_condensate.run_condensate(dir, lmp, seq, num)
 
         cnt_seq += 1
         print(cnt_seq, '/', num_seqs, 'sequences proccessed.')
