@@ -1,1 +1,0 @@
-moltemplate.sh system.lt
