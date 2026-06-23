@@ -28,18 +28,20 @@ lazyphase --help
 
 Generating the sequences and preparing the high-throughput simulations:
 ```
-lazyphase generate_sequences --alphabet SL --length 64 --num 100 --output seqs.txt
+lazyphase generate_sequences --dir examples/stickers_spacers --num 100 --composition S48.L16
 ```
 
 Prepare the simulations, the same conditions will be applied to each sequence,
 because the tool is designed to investigate sequence effects:
 ```
-lazyphase prepare
+lazyphase prepare --dir examples/stickers_spacers
 ```
+Here we runned with the default parameters, they all can be specified according
+to the CLI help message.
 
 Run the high-throughput simulations:
 ```
-lazyphase run --seqs seqs.txt --time 1
+lazyphase run --dir examples/stickers_spacers --lmp lmp_kokkos
 ```
 --seqs specifies the file containing the sequences, each in separate line, and
 --time is the modeling time in microseconds.
