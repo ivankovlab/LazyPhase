@@ -1,3 +1,4 @@
+# The target directory for the simulations must be passed to this scripts.
 DIR="$1"
 
 # Save the current path.
@@ -5,8 +6,8 @@ current_dir=$(pwd)
 
 # Move to the target directory to prepare the system there.
 cd $DIR
-  # Assemble the system with defined cell size and initial positions of
-  # polymers.
+  # Assemble the system with defined cell size and initial positions and
+  # orientations of polymers.
   moltemplate.sh system.lt
 
   # Remove the temporal and guide files that will not be used for simulations.

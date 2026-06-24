@@ -122,6 +122,9 @@ def generate_random_string(composition: list) -> str:
     """
     Generate a string with exactly N_S 'S' characters and S_L 'L' characters,
     arranged in a random order.
+
+    composition : list
+        List of tuples ('one-code residue name', # occurences in the sequence).
     """
 
     # Build the blocky string.
@@ -131,34 +134,21 @@ def generate_random_string(composition: list) -> str:
 
     return ''.join(symbols)
 
-
-#def generate_seqs():
-#    file_seqs = open('seqs.txt', 'w')
-
-#    seqs = set([
-#        'SL' * 32,
-#        'SSLL' * 16,
-#        ('S' * 4 + 'L' * 4) * 8,
-#        ('S' * 8 + 'L' * 8) * 4,
-#        'S' * 16 + 'L' * 16 + 'S' * 16 + 'L' * 16,
-#        'S' * 32 + 'L' * 32,
-#        ('S' * 3 + 'L' * 1) * 16,
-#        'S' * 48 + 'L' * 16,
-#        'L' * 8 + 'S' * 48 + 'L' * 8,
-#        ('S' * 24 + 'L' * 8) * 2,
-#        ('L' * 6 + 'S' * 20 + 'L' * 2 + 'S' * 4) * 2,
-#        ('S' * 12 + 'L' * 4) * 4,
-#        'L' * 8 + 'S' * 24 + ('S' * 3 + 'L' * 1) * 8
-#    ])
-
-#    for i in range(10):
-#        N_S = randint(16, 32)
-#        seqs.add(generate_random_string(N_S, 64 - N_S))
-
-#    for seq in seqs:
-#        file_seqs.write(seq + '\n')
-
-#    file_seqs.close()
+#seqs = set([
+#    'SL' * 32,
+#    'SSLL' * 16,
+#    ('S' * 4 + 'L' * 4) * 8,
+#    ('S' * 8 + 'L' * 8) * 4,
+#    'S' * 16 + 'L' * 16 + 'S' * 16 + 'L' * 16,
+#    'S' * 32 + 'L' * 32,
+#    ('S' * 3 + 'L' * 1) * 16,
+#    'S' * 48 + 'L' * 16,
+#    'L' * 8 + 'S' * 48 + 'L' * 8,
+#    ('S' * 24 + 'L' * 8) * 2,
+#    ('L' * 6 + 'S' * 20 + 'L' * 2 + 'S' * 4) * 2,
+#    ('S' * 12 + 'L' * 4) * 4,
+#    'L' * 8 + 'S' * 24 + ('S' * 3 + 'L' * 1) * 8
+#])
 
 
 def parse_pdb(filename: str):
@@ -186,8 +176,13 @@ def parse_pdb(filename: str):
     return atoms
 
 
-def contact_threshold(type_i, type_j):
-    """Contact distance threshold for two atom types."""
+def contact_threshold(type_i: int, type_j: int):
+    """Contact distance threshold for two atom types.
+    type_i : int
+        The first bead type.
+    type_j : int
+        The second bead type.
+    """
 
     r_i = RADII[type_i]
     r_j = RADII[type_j]
@@ -198,31 +193,45 @@ def contact_threshold(type_i, type_j):
 def count_contacts(atoms: list):
     """
     Count pairs (i<j) with different types and distance < threshold.
+    atoms : list
+        List of all atoms described as dictionaries with keys 'type' and
+        'coords'.
     """
 
     count = dict()
 
     n = len(atoms)
 
-    for i in range(n):
+    for i in range(n):  # Read the first atom.
         ai = atoms[i]
+
+        # Read its type and coordinates.
         ti = ai['type']
         xi, yi, zi = ai['coords']
-        for j in range(i + 1, n):
+
+        for j in range(i + 1, n):  # Read the second atom, the pairs count once.
             aj = atoms[j]
+
+            # Read its type and coordinates.
             tj = aj['type']
             xj, yj, zj = aj['coords']
+
+            # Calculate the distance between the beads.
             dx = xi - xj
             dy = yi - yj
             dz = zi - zj
+
             dist_sq = dx*dx + dy*dy + dz*dz
+
             thresh = contact_threshold(ti, tj)
+
             if dist_sq < thresh * thresh:
                 pair = (min((ti, tj)), max((ti, tj)))
                 if pair in count:
                     count[pair] += 1
                 else:
                     count[pair] = 1
+
     return sum(count.values())
 
 
@@ -230,6 +239,9 @@ def radius_of_gyration(coords: list[tuple[float, float, float]]) -> float:
     """
     Compute the radius of gyration Rg = sqrt( (1/N) * Σ|r_i - r_com|² ).
     All atoms are equally weighted (mass = 1).
+
+    coords : list[tuple[float, float, float]]
+        Coordinates of the bead centers.
     """
 
     n = len(coords)
@@ -253,6 +265,12 @@ def radius_of_gyration(coords: list[tuple[float, float, float]]) -> float:
 def clustering(coords: list[tuple[float, float, float]], R: float) -> float:
     """
     Compute clustering of the 3D points in spheres of radius R.
+
+    coords : list[tuple[float, float, float]]
+        Coordinates of the bead centers.
+
+    R : float
+        Radius of the clustering to search for the adjacent beads.
     """
 
     num_points = len(coords)
@@ -271,6 +289,13 @@ def clustering(coords: list[tuple[float, float, float]], R: float) -> float:
 
 
 def generate_sequences(args):
+    """Generate sequences in seqs.txt in the target directory of the
+       simulations.
+
+    args
+        CLI arguments of the command generate_sequences.
+    """
+
     dir = args.dir
     if dir[-1] != '/':
         dir += '/'
@@ -292,16 +317,29 @@ def generate_sequences(args):
     num_seqs_before = len(seqs)
     print(num_seqs_before, 'different sequences before generation.')
 
-    composition = args.composition.split('.')
-    composition = [(monomer[0], int(monomer[1:])) for monomer in composition]
+    # Generate the set of different sequences.
+    if args.blocky is None:  # Generate random sequence of desired composition.
+        composition = args.composition.split('.')
+        composition = [(monomer[0], int(monomer[1:])) for monomer in composition]
 
-    num_to_generate = args.num
+        num_to_generate = args.num
 
-    print('Generate sequences until', num_to_generate,
-          'new sequences will be obtained...')
+        print('Generate sequences until', num_to_generate,
+              'new sequences will be obtained...')
 
-    while len(seqs) < num_seqs_before + num_to_generate:
-        seqs.add(generate_random_string(composition))
+        while len(seqs) < num_seqs_before + num_to_generate:
+            seqs.add(generate_random_string(composition))
+    else:  # Generate all blocky sequences.
+        N = args.blocky
+
+        if N <= 0 or (N & (N - 1)) != 0:
+            print('The blocky polymer length must be a power of two.')
+            return
+
+        block = 1
+        while block <= N // 2:
+            seqs.add(('S' * block + 'L' * block) * (N // (block * 2)))
+            block *= 2
 
     print(len(seqs), 'different sequences after generation.')
 
@@ -339,6 +377,7 @@ def prepare(args):
         print('The sequences must be of the same length. Terminate.')
         return
 
+    # Identify the common length of all sequences.
     N = seqs_lens.pop()
     print('All sequences are', N, 'residues long.')
 
@@ -403,6 +442,9 @@ def prepare(args):
 
 
 def run(args):
+    """Run all simulations defined on the sequence generation and preparation
+       steps."""
+
     print('Started the high-throughput condensate simulations...')
 
     dir = args.dir
@@ -415,6 +457,15 @@ def run(args):
 
 
 def analyse(args):
+    """Calculate statistics for all available simulations.
+
+    args
+        CLI arguments.
+
+    Returns the report for all sequences as a dictionary of dictionaries with
+    the sequences as main keys and all calculated statistics as subkeys.
+    """
+
     print('Preparing report on simulations...')
 
     dir_path = Path(args.dir)
@@ -426,11 +477,15 @@ def analyse(args):
         print('Report directory will is created.')
 
     report = dict()
+
     for seq in seqs:
         report[seq] = dict()
         report[seq]['contacts'] = count_contacts()
         report[seq]['R_gyr'] = radius_of_gyration()
         report[seq]['clustering'] = clustering()
+
+    # To use as an importable module.
+    return report
 
 
 if __name__ == '__main__':  # If run as CLI tool.
@@ -474,6 +529,12 @@ if __name__ == '__main__':  # If run as CLI tool.
         "--composition", type=str,
         help="""Composition of the sequences in format, where A20.B2.C6
                 corresponds to 20 A, 2 B and 6 C beads, for example."""
+    )
+
+    parser_generate_sequences.add_argument(
+        "--blocky", type=int, default=None,
+        help="""Generate all blocky sequences of the desired length. The block
+                lengths will be all possible power of two, starting from one."""
     )
 
     parser_generate_sequences.set_defaults(func=generate_sequences)
@@ -627,8 +688,10 @@ if __name__ == '__main__':  # If run as CLI tool.
     #parser_run.print_help()
     #parser_analyse.print_help()
 
+    #####################
+    # Run the CLI tool. #
+    #####################
+
     # Parse the input and follow the commands.
     args = parser.parse_args()
     args.func(args)
-
-    #exit(0)

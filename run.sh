@@ -1,10 +1,11 @@
+# The target directory.
 DIR="$1"
+# LAMMPS running rules.
 LMP="$2"
 
 # Save the current path.
 current_dir=$(pwd)
 
-echo "$DIR"
 # Move to the target directory to prepare the system there.
 cd $DIR
   # Adjust for Your LAMMPS installation and setup of hardware interface.
@@ -33,4 +34,4 @@ cd $DIR
   esac
 
 # Return to the initial user path.
-cd current_dir
+cd $current_dir
