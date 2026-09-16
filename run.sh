@@ -26,7 +26,7 @@ cd $DIR
         lmp -i run.in.nvt
         ;;
     "lmp_kokkos")
-        lmp -k on g 1 t 20 -sf kk -pk kokkos gpu/aware on neigh half newton off -in run.in.nvt
+        lmp -k on g 1 t 20 -sf kk -pk kokkos gpu/aware off neigh half newton off -in run.in.nvt
         ;;
     *)
         echo "Unknown LAMMPS run setup."

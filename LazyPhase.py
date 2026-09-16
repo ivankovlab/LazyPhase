@@ -20,8 +20,16 @@ import argparse
 from random import shuffle
 import numpy as np
 from pathlib import Path
-import run_condensates_throughput
 import os
+from matplotlib import pyplot as plot
+import matplotlib
+import scipy.spatial as spatial
+import ast
+
+matplotlib.rcParams['figure.dpi'] = 300
+matplotlib.rcParams['mathtext.fontset'] = 'stix'
+matplotlib.rc('font', family='STIXGeneral')
+matplotlib.rc('font', weight='ultralight')
 
 
 # Pre-calculate the sixth root of two for dipole-dipole attractions, also known
@@ -75,6 +83,9 @@ def generate_substituted_file(path_in: str, path_out: str,
 
     file_in.close()
     file_out.close()
+
+
+import run_condensates_throughput, continue_condensates_throughput
 
 
 def get_seq_het(seq: str, w: int, alphabet: set) -> dict:
@@ -134,22 +145,6 @@ def generate_random_string(composition: list) -> str:
 
     return ''.join(symbols)
 
-#seqs = set([
-#    'SL' * 32,
-#    'SSLL' * 16,
-#    ('S' * 4 + 'L' * 4) * 8,
-#    ('S' * 8 + 'L' * 8) * 4,
-#    'S' * 16 + 'L' * 16 + 'S' * 16 + 'L' * 16,
-#    'S' * 32 + 'L' * 32,
-#    ('S' * 3 + 'L' * 1) * 16,
-#    'S' * 48 + 'L' * 16,
-#    'L' * 8 + 'S' * 48 + 'L' * 8,
-#    ('S' * 24 + 'L' * 8) * 2,
-#    ('L' * 6 + 'S' * 20 + 'L' * 2 + 'S' * 4) * 2,
-#    ('S' * 12 + 'L' * 4) * 4,
-#    'L' * 8 + 'S' * 24 + ('S' * 3 + 'L' * 1) * 8
-#])
-
 
 def parse_pdb(filename: str):
     """
@@ -159,6 +154,7 @@ def parse_pdb(filename: str):
     """
 
     atoms = []
+
     with open(filename, 'r') as f:
         for line in f:
             if not line.startswith(('ATOM', 'HETATM')):
@@ -167,7 +163,7 @@ def parse_pdb(filename: str):
                 tokens = line.split()
                 x, y, z = float(tokens[5]), float(tokens[6]), float(tokens[7])
                 atype = int(tokens[2])
-                if atype not in RADII:   # only types 1,2,3
+                if atype not in RADII:  # only types 1,2,3
                     continue
                 atoms.append({'coords': (x, y, z), 'type': atype})
             except (ValueError, IndexError):
@@ -236,9 +232,8 @@ def count_contacts(atoms: list):
 
 
 def radius_of_gyration(coords: list[tuple[float, float, float]]) -> float:
-    """
-    Compute the radius of gyration Rg = sqrt( (1/N) * Σ|r_i - r_com|² ).
-    All atoms are equally weighted (mass = 1).
+    """Compute the radius of gyration Rg = sqrt( (1/N) * Σ|r_i - r_com|² ). All
+    atoms are equally weighted (mass = 1).
 
     coords : list[tuple[float, float, float]]
         Coordinates of the bead centers.
@@ -262,30 +257,36 @@ def radius_of_gyration(coords: list[tuple[float, float, float]]) -> float:
     return R_gyr
 
 
-def clustering(coords: list[tuple[float, float, float]], R: float) -> float:
-    """
-    Compute clustering of the 3D points in spheres of radius R.
+def clustering(coords: list[tuple[int, float, float, float]], R: float,
+               M: int, L: int) -> float:
+    """Compute clustering of the 3D points in spheres of radius R.
 
-    coords : list[tuple[float, float, float]]
-        Coordinates of the bead centers.
-
+    coords : list[tuple[int, float, float, float]]
+        Molecule IDs and coordinates of the bead centers.
     R : float
         Radius of the clustering to search for the adjacent beads.
+    M : int
+        Number of polymers in the system.
+    L : int
+        Number of residues of a polymer.
     """
 
     num_points = len(coords)
     count = 0
 
+    tree = spatial.cKDTree([(bead[1], bead[2], bead[3]) for bead in coords])
+
     for i in range(num_points):
-        for j in range(i+1, num_points):
-            a, b = coords[i], coords[j]
-            r = math.sqrt((a[0] - b[0])**2 + \
-                          (a[1] - b[1])**2 + \
-                          (a[2] - b[2])**2)
-            if r < R:
+        point = (coords[i][1], coords[i][2], coords[i][3])
+        indices = tree.query_ball_point(point, R)
+        #count += len([i for i in indices])
+        count = 0
+        for i in indices:
+            if coords[i][0] == 3:
                 count += 1
 
-    return 2 * count / N / (N - 1)
+    max_inter_contacts = M * L * (M - 1) * L / 2
+    return count / 2 / max_inter_contacts
 
 
 def generate_sequences(args):
@@ -456,6 +457,154 @@ def run(args):
     print('The simulations finished.')
 
 
+def cmd_continue(args):
+    """Continue all simulations."""
+
+    print('Continued the high-throughput condensate simulations...')
+
+    dir = args.dir
+    if dir[-1] != '/':
+        dir += '/'
+
+    template_file = open(dir + 'template.run.in.nvt', 'r')
+    template_lines = template_file.readlines()
+    template_file.close()
+
+    continue_file = open(dir + 'continue.run.in.nvt', 'w')
+
+    for line in template_lines:
+        if len(line) > 3 and '#' not in line and 'run' not in line and 'write_data' not in line and 'fix trap' not in line:
+             continue_file.write(line.replace('SEQUENCE', 'SEQUENCE_prolong').replace('system.data', 'output/SEQUENCE.data') + '\n')
+
+        if 'timestep' in line:
+            steps = round(args.time * 10**9 / float(line.split()[-1]))
+
+    continue_file.write('# Continue relaxation to equilibrate the pre-formed condensate.\n')
+    continue_file.write('run ' + str(steps) + '\n\n')
+    continue_file.write('write_data output/SEQUENCE_prolong.data\n')
+    continue_file.close()
+
+    repeats = args.repeats
+    lmp = args.lmp
+    interrupted = args.interrupted
+
+    continue_condensates_throughput.continue_condensates_throughput(
+        dir, lmp, repeats, interrupted
+    )
+
+    print('The simulations finished.')
+
+
+def calculate_trajectory_gyrations(traj_path: str):
+    """Read coordinates of all beads for all saved trajectory states."""
+
+    traj_file = open(traj_path, 'r')
+    traj_lines = traj_file.readlines()
+    traj_file.close()
+
+    states = []
+
+    for line in traj_lines:
+        if 'ITEM: ATOMS id mol type x y z ix iy iz' in line:
+            states.append([])
+        if '0 0 0' in line:
+            tokens = line.split()
+            states[-1].append((float(tokens[3]),
+                              float(tokens[4]),
+                              float(tokens[5])))
+
+    gyrations = [radius_of_gyration(state) for state in states]
+
+    return gyrations
+
+
+def calculate_contacts(beads: list[tuple[int, float, float, float]],
+                       bead_types: set, bead_borders: dict) -> dict:
+    """Count contacts for all type pairs.
+
+    beads : list[tuple[int, float, float, float]]
+        Types and coordinates of the beads.
+    bead_types : set[int]
+        All identified bead types in the system.
+    bead_borders : dict
+        Lower and upper borders for contact distances.
+    """
+
+    contacts = dict()
+    for bead_pair in bead_borders:
+        contacts[bead_pair] = 0
+
+    tree = spatial.cKDTree([(bead[1], bead[2], bead[3]) for bead in beads])
+
+    for bead in beads:
+        indices = tree.query_ball_point((bead[1], bead[2], bead[3]), 12.0)
+        adjacent_points = [beads[i] for i in indices]
+
+        for point in adjacent_points:
+            type_i, type_j = bead[0], point[0]
+
+            lower_border, upper_border = bead_borders[(min(type_i, type_j),
+                                                       max(type_i, type_j))]
+
+            distance = (bead[1] - point[1])**2 + \
+                       (bead[2] - point[2])**2 + \
+                       (bead[3] - point[3])**2
+
+            if lower_border**2 < distance < upper_border**2:
+                contacts[(min(type_i, type_j), max(type_i, type_j))] += 1
+
+    for pair in contacts:
+        contacts[pair] //= 2
+
+    return contacts
+
+
+def calculate_trajectory_contacts(traj_path: str) -> list:
+    """Calculate contact statistics for all saved trajactory states."""
+
+    traj_file = open(traj_path, 'r')
+    traj_lines = traj_file.readlines()
+    traj_file.close()
+
+    states = []
+
+    bead_types = set()
+
+    for line in traj_lines:
+        if 'ITEM: ATOMS id mol type x y z ix iy iz' in line:
+            states.append([])
+        if '0 0 0' in line:
+            tokens = line.split()
+            states[-1].append((int(tokens[2]),
+                               float(tokens[3]),
+                               float(tokens[4]),
+                               float(tokens[5])))
+            bead_types.add(int(tokens[2]))
+
+    print('Identified bead types ' + str(bead_types) + '.')
+
+    bead_borders = {
+        (1, 1): (4.0, 4.0),
+        (1, 2): (3.0, 3.0),
+        (1, 3): (4.0, 5.0),
+        (2, 2): (2.0, 3.0),
+        (2, 3): (3.0, 4.0),
+        (3, 3): (4.0, 12.0)
+    }
+
+    print('Contacts for each of', len(states), 'states will be counted.')
+
+    contacts = []
+
+    num_state = 0
+    for state in states:
+        contacts.append(calculate_contacts(state, bead_types, bead_borders))
+        print('Contacts for state', num_state, 'counted.')
+        num_state += 1
+
+    return contacts
+
+
 def analyse(args):
     """Calculate statistics for all available simulations.
 
@@ -466,6 +615,158 @@ def analyse(args):
     the sequences as main keys and all calculated statistics as subkeys.
     """
 
+    contacts_flag = args.contacts
+    gyration_flag = args.gyration
+    cluster_flag = args.cluster
+    calculate_flag = args.calculate
+
+    block_length_colors = {
+        1: '#669bbc',
+        2: '#003049',
+        4: '#588157',
+        8: '#344e41',
+        16: '#dd2d4a',
+        32: '#880d1e'
+    }
+
+    dir = '/Users/egor/Desktop/scripts_results/LazyPhase/examples/stickers_spacers/'
+
+    # Calculate clustering scales, if asked.
+    if cluster_flag:
+        for block_length in [1, 2, 4, 8, 16, 32]:
+            print('Block length ' + str(block_length) + '.')
+
+            clusts_pool = []
+
+            for n in range(1, 10+1):
+                print('Simulation number ' + str(n) + '.')
+
+                cluster_file = open(dir + 'statistics/cluster_' + ('S' * block_length + 'L' * block_length) * (64 // (block_length * 2)) + '_' + str(n) + '.txt', 'w')
+
+                # Read all beads from a .data file to calculate their
+                # clustering on different scales.
+                beads = read_beads_from_LAMMPS_data(
+                    dir + 'output/' + ('S' * block_length + 'L' * block_length) * (64 // (block_length * 2)) + '_' + str(n) + '.data'
+                )
+
+                Rs, clusts = np.arange(20, 200, 20), []
+                for R in Rs:
+                    print('Radius ' + str(R) + ' Å.')
+                    clusts.append(clustering(beads, R, 27, 64 * 2))
+
+                clusts_pool.append(clusts)
+
+                cluster_file.close()
+
+            clusts_averaged, std_lower, std_upper = [], [], []
+
+            for i in range(len(clusts)):
+                sum_at_distance = sum([clusts_pool[n][i] for n in range(10)])
+                std = np.std([clusts_pool[n][i] for n in range(10)])
+                clusts_averaged.append(sum_at_distance / 10)
+                std_lower.append(sum_at_distance / 10 - std)
+                std_upper.append(sum_at_distance / 10 + std)
+
+            plot.plot(np.log(Rs), np.log(clusts_averaged),
+                      color=block_length_colors[block_length], alpha=0.5,
+                      label=str(block_length))
+
+            #plot.fill_between(Rs, std_lower, std_upper,
+            #                  color=block_length_colors[block_length],
+            #                  alpha=0.25)
+
+        plot.xlabel('R (Å)', fontsize=16)
+        plot.ylabel('C(R)', fontsize=16)
+        plot.legend(title='Block length', fontsize=16, title_fontsize=16)
+        plot.tight_layout()
+        plot.savefig('clustering.png')
+
+    # Calculate radii of gyration, if asked.
+    if gyration_flag:
+        timestamps = np.array([i for i in range(301 + 1001 - 1)],
+                              dtype=float) / 10.0
+
+        for n in range(1, 10+1):
+            gyrations = calculate_trajectory_gyrations(
+                dir + 'output/' + 'SL' * 32 + '_' + str(n) + '.lammpstrj'
+            )
+            gyrations_prolong = calculate_trajectory_gyrations(
+                dir + 'output/' + 'SL' * 32 + '_' + str(n) + '_prolong.lammpstrj'
+
+            )
+
+            if n == 1:
+                label = '1'
+            else:
+                label = None
+            #plot.scatter(timestamps[200:], gyrations[200:], label=label,
+            #             color='#81b29a', alpha=0.5)
+            plot.plot(timestamps[200:], (gyrations + gyrations_prolong[1:])[200:], color='#81b29a', label=label)
+
+        for n in range(1, 10+1):
+            gyrations = calculate_trajectory_gyrations(dir + 'output/' + ('S' * 2 + 'L' * 2) * 16 + '_' + str(n) + '.lammpstrj')
+            gyrations_prolong = calculate_trajectory_gyrations(dir + 'output/' + ('S' * 2 + 'L' * 2) * 16 + '_' + str(n) + '_prolong.lammpstrj')
+            if n == 1:
+                label = '2'
+            else:
+                label = None
+
+            #plot.scatter(timestamps[200:], gyrations[200:], label=label,
+            #             color='#e07a5f', alpha=0.5)
+            plot.plot(timestamps[200:],
+                      (gyrations + gyrations_prolong[1:])[200:],
+                      color='#e07a5f', label=label)
+
+        plot.xlabel('Time (ns)', fontsize=16)
+        plot.ylabel('Radius of gyration (Å)', fontsize=16)
+        plot.legend(title='Block length', fontsize=16, title_fontsize=16)
+        plot.tight_layout()
+        plot.savefig('fig.png')
+
+    # Calculate contact statistics, if asked.
+    if contacts_flag:
+        #for n in range(1, 10+1):
+        #    trajectory_contacts_nucleus = calculate_trajectory_contacts('examples/stickers_spacers/output/' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '.lammpstrj')
+        #    trajectory_contacts_prolong = calculate_trajectory_contacts('examples/stickers_spacers/output/' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '_prolong.lammpstrj')[1:]
+        #    trajectory_contacts = trajectory_contacts_nucleus + trajectory_contacts_prolong
+
+        #    statistics_report_file = open('examples/stickers_spacers/statistics/contacts_' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '.txt', 'w')
+
+        #    for contacts in trajectory_contacts:
+        #        statistics_report_file.write(str(contacts) + '\n')
+
+        #    statistics_report_file.close()
+
+        timestamps = np.array([i for i in range(301 + 1001 - 1)],
+                              dtype=float) / 10.0
+
+        for block_length in [1, 2, 4, 8, 16, 32]:
+            for n in range(1, 10+1):
+                statistics_report_file = open(dir + 'statistics/contacts_' + ('S' * block_length + 'L' * block_length) * (64 // (2 * block_length)) + '_' + str(n) + '.txt', 'r')
+                statistics_lines = statistics_report_file.readlines()
+                statistics_report_file.close()
+
+                statistics_states = []
+                for line in statistics_lines[301:]:
+                    contacts_dict = ast.literal_eval(line)
+                    # L L
+                    #statistics_states.append(int(line.strip()[1:-1].split(':')[-1].strip()))
+                    # S S
+                    statistics_states.append(contacts_dict[(2,3)])
+
+                if n == 1:
+                    label = str(block_length)
+                else:
+                    label = None
+
+                plot.plot(timestamps[301:], statistics_states, label=label, color=block_length_colors[block_length], alpha=0.5)
+
+        plot.xlabel('Time (ns)', fontsize=16)
+        plot.ylabel('Number of contacts', fontsize=16)
+        plot.legend(title='Block length', fontsize=16, title_fontsize=16)
+        plot.tight_layout()
+        plot.savefig('contacts_B_L.png')
+
     print('Preparing report on simulations...')
 
     dir_path = Path(args.dir)
@@ -473,19 +774,51 @@ def analyse(args):
     if dir_path.is_dir():
         print('Report directory already exists.')
     else:
-        path.mkdir(parents=False, exist_ok=False)
-        print('Report directory will is created.')
+        dir_path.mkdir(parents=False, exist_ok=False)
+        print('Report directory created.')
 
     report = dict()
 
+    seqs = {'SL' * 32, 'SSLL' * 16}
+
     for seq in seqs:
         report[seq] = dict()
-        report[seq]['contacts'] = count_contacts()
-        report[seq]['R_gyr'] = radius_of_gyration()
-        report[seq]['clustering'] = clustering()
+        #report[seq]['contacts'] = count_contacts()
+        #report[seq]['R_gyr'] = radius_of_gyration()
+        #report[seq]['clustering'] = clustering()
 
     # To use as an importable module.
     return report
+
+
+def read_beads_from_LAMMPS_data(path: str) -> \
+    list[tuple[int, float, float, float]]:
+    """"Read molecule ID and coordinates of each bead in LAMMPS data file."""
+
+    beads = []
+
+    LAMMPS_data_file = open(path, 'r')
+    LAMMPS_data_lines = LAMMPS_data_file.readlines()
+    LAMMPS_data_file.close()
+
+    read_atoms = False
+
+    for line in LAMMPS_data_lines:
+        if 'Atoms' in line:  # Atom section started.
+            read_atoms = True
+
+        if read_atoms:  # If the current section is atoms, read atomic params.
+            tokens = line.split()
+
+            if len(tokens) == 10:
+                molecule_id = int(tokens[1])
+                x, y, z = float(tokens[4]), float(tokens[5]), float(tokens[6])
+                beads.append((molecule_id, x, y, z))
+
+        if 'Velocities' in line:  # Atom section ended.
+            break
+
+    return beads
 
 
 if __name__ == '__main__':  # If run as CLI tool.
@@ -540,7 +873,7 @@ if __name__ == '__main__':  # If run as CLI tool.
     parser_generate_sequences.set_defaults(func=generate_sequences)
 
     #########################################################################
-    # Command to prepare the simulations for the sequences generated on     #
+    # Command to prepare the simulations for the sequences generated on the #
     # previous step.                                                        #
     #########################################################################
 
@@ -555,8 +888,8 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_prepare.add_argument(
-        "--repeats", type=int, default=3,
-        help="Number of simulation repeats for each sequence. Default=3."
+        "--repeats", type=int, default=10,
+        help="Number of simulation repeats for each sequence. Default=10."
     )
 
     parser_prepare.add_argument(
@@ -577,7 +910,7 @@ if __name__ == '__main__':  # If run as CLI tool.
     parser_prepare.add_argument(
         "--damping_time", type=int, default=100,
         help="""Damping time of Langevin thermostat in picoseconds.
-                Default=0.1."""
+                Default=100."""
     )
 
     parser_prepare.add_argument(
@@ -636,7 +969,7 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_run.add_argument(
-        "--repeats", type=int, default=3,
+        "--repeats", type=int, default=10,
         help="Number of repeats per sequence."
     )
 
@@ -649,6 +982,45 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_run.set_defaults(func=run)
+
+    ##################################################
+    # Command to continue the performed simulations. #
+    ##################################################
+
+    parser_continue = subparsers.add_parser(
+        "continue",
+        help="Continue the simulations."
+    )
+
+    parser_continue.add_argument(
+        "--dir", type=str,
+        help="Directory path for the simulations."
+    )
+
+    parser_continue.add_argument(
+        "--repeats", type=int, default=10,
+        help="Number of repeats per sequence."
+    )
+
+    parser_continue.add_argument(
+        "--time", type=float, default=0.1,
+        help="Condensate simulation time in microseconds. Default=0.1."
+    )
+
+    parser_continue.add_argument(
+        "--lmp", type=str, default='lmp_mpi',
+        choices=['lmp', 'lmp_kokkos',
+                 'lmp_mpi', 'lmp_mpi_kokkos',
+                 'lmp_serial', 'lmp_serial_kokkos'],
+        help="Setup of LAMMPS run."
+    )
+
+    parser_continue.add_argument(
+        "--interrupted", type=bool, default=True,
+        help="Whether to calculate only the interrupted trajectories."
+    )
+
+    parser_continue.set_defaults(func=cmd_continue)
 
     #################################################
     # Command to analyse the performed simulations. #
@@ -665,28 +1037,26 @@ if __name__ == '__main__':  # If run as CLI tool.
     )
 
     parser_analyse.add_argument(
-        "--cluster", type=bool, default=True,
+        "--cluster", action='store_true',
         help="Clustering."
     )
 
     parser_analyse.add_argument(
-        "--gyration", type=bool, default=True,
+        "--gyration", action='store_true',
         help="Radius of gyration."
     )
 
     parser_analyse.add_argument(
-        "--contacts", type=bool, default=True,
+        "--contacts", action='store_true',
         help="Contact statistics."
     )
 
-    parser.print_help()
-    #parser_generate_sequences.add_argument(
-    #    "-h", "--help",
-    #    action=lambda: parser_generate_sequences.print_help(), help="Show all help"
-    #)
-    #parser_prepare.print_help()
-    #parser_run.print_help()
-    #parser_analyse.print_help()
+    parser_analyse.add_argument(
+        "--calculate", action='store_true',
+        help="Calculate, not only plot."
+    )
+
+    parser_analyse.set_defaults(func=analyse)
 
     #####################
     # Run the CLI tool. #

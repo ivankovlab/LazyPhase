@@ -68,7 +68,7 @@ for line in lines_LAMMPS:  # Read the whole LAMMPS data file.
 
 # Define all atoms as heteroatoms.
 file_PDB = open(pdb, 'w')
-for line in lines[:-1]:
+for line in lines_PDB[:-1]:
     tokens = line.split()
     if line[0] == 'A':
         # Change 'ATOM' to 'HETATM' because we can define the arbitrary beads.
@@ -81,5 +81,5 @@ for bond in bonds:
     file_PDB.write('CONECT ' + (4 - len(str(bond[0]))) * ' ' + str(bond[0]) + \
                    ' ' + (4 - len(str(bond[1]))) * ' ' + str(bond[1]) + '\n')
 
-file_PDB.write(lines[-1])
+file_PDB.write(lines_PDB[-1])
 file_PDB.close()

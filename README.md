@@ -49,7 +49,7 @@ lazyphase run --dir examples/stickers_spacers --lmp lmp_kokkos
 Rewarding Your simulation efforts, the simulations can be automatically analysed
 :
 ```
-lazyphase analyse --dir examples/stickers_spacers
+lazyphase analyse --dir examples/stickers_spacers --cluster --gyration --contacts
 ```
 
 ### Copyright, contact, and citation
