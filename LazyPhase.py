@@ -4,14 +4,12 @@
 """
 Calculate radius of gyration from a PDB file.
 All atoms are treated as having equal mass.
-"""
 
-"""
 Count contacts between atoms of different types in a PDB file.
 Type determination: the B‑factor (temperature factor) column must contain
 the integer type (1, 2, or 3). All other atoms are ignored.
 Radii: r1 = 2, r2 = 2, r3 = 6 (in arbitrary units, typically Å).
-Contact: dist < 2 * (2^(1/6)*r_i + 2^(1/6)*r_j).
+Contact: dist_min (zero-crossing) < dist < 2 * (2^(1/6)*r_i + 2^(1/6)*r_j).
 """
 
 
@@ -19,6 +17,7 @@ import math
 import argparse
 from random import shuffle
 import numpy as np
+from scipy.stats import linregress
 from pathlib import Path
 import os
 from matplotlib import pyplot as plot
@@ -26,7 +25,7 @@ import matplotlib
 import scipy.spatial as spatial
 import ast
 
-matplotlib.rcParams['figure.dpi'] = 300
+matplotlib.rcParams['figure.dpi'] = 1000
 matplotlib.rcParams['mathtext.fontset'] = 'stix'
 matplotlib.rc('font', family='STIXGeneral')
 matplotlib.rc('font', weight='ultralight')
@@ -257,35 +256,49 @@ def radius_of_gyration(coords: list[tuple[float, float, float]]) -> float:
     return R_gyr
 
 
-def clustering(coords: list[tuple[int, float, float, float]], R: float,
-               M: int, L: int) -> float:
+def clustering(coords: list[tuple[int, int, float, float, float]], R: float,
+               M: int, bead_types: list[int]) -> float:
     """Compute clustering of the 3D points in spheres of radius R.
 
-    coords : list[tuple[int, float, float, float]]
-        Molecule IDs and coordinates of the bead centers.
+    coords : list[tuple[int, int, float, float, float]]
+        Molecule IDs, bead types, and coordinates of the bead centers.
     R : float
         Radius of the clustering to search for the adjacent beads.
     M : int
         Number of polymers in the system.
-    L : int
-        Number of residues of a polymer.
+    bead_types : list[int]
+        Bead types to calculate clustering for.
     """
 
     num_points = len(coords)
+
+    # Build a KD-tree for the points.
+    tree = spatial.cKDTree([(bead[2], bead[3], bead[4]) for bead in coords])
+
+    # Counter of the intermolecular contacts.
     count = 0
 
-    tree = spatial.cKDTree([(bead[1], bead[2], bead[3]) for bead in coords])
+    # Number of appropriate beads in a polymer.
+    L = 0
 
-    for i in range(num_points):
-        point = (coords[i][1], coords[i][2], coords[i][3])
+    for j in range(num_points):
+        if coords[j][1] in bead_types and coords[j][0] == 1:
+            L += 1
+        else:
+            continue
+
+        point = (coords[j][2], coords[j][3], coords[j][4])
+
         indices = tree.query_ball_point(point, R)
-        #count += len([i for i in indices])
-        count = 0
+
         for i in indices:
-            if coords[i][0] == 3:
+            if coords[i][0] != coords[j][0] and coords[i][1] in bead_types:
                 count += 1
 
+    # Maximal number of intermolecular contacts.
     max_inter_contacts = M * L * (M - 1) * L / 2
+
+    # Calculate and return the clustering coefficient.
     return count / 2 / max_inter_contacts
 
 
@@ -321,7 +334,9 @@ def generate_sequences(args):
     # Generate the set of different sequences.
     if args.blocky is None:  # Generate random sequence of desired composition.
         composition = args.composition.split('.')
-        composition = [(monomer[0], int(monomer[1:])) for monomer in composition]
+        composition = [
+            (monomer[0], int(monomer[1:])) for monomer in composition
+        ]
 
         num_to_generate = args.num
 
@@ -473,13 +488,19 @@ def cmd_continue(args):
     continue_file = open(dir + 'continue.run.in.nvt', 'w')
 
     for line in template_lines:
-        if len(line) > 3 and '#' not in line and 'run' not in line and 'write_data' not in line and 'fix trap' not in line:
-             continue_file.write(line.replace('SEQUENCE', 'SEQUENCE_prolong').replace('system.data', 'output/SEQUENCE.data') + '\n')
+        if len(line) > 3 and '#' not in line and 'run' not in line \
+                         and 'write_data' not in line \
+                         and 'fix trap' not in line:
+             continue_file.write(
+                line.replace(
+                    'SEQUENCE', 'SEQUENCE_prolong').replace(
+                        'system.data', 'output/SEQUENCE.data') + '\n')
 
         if 'timestep' in line:
             steps = round(args.time * 10**9 / float(line.split()[-1]))
 
-    continue_file.write('# Continue relaxation to equilibrate the pre-formed condensate.\n')
+    continue_file.write('''# Continue relaxation to equilibrate the pre-formed
+                             condensate.\n''')
     continue_file.write('run ' + str(steps) + '\n\n')
     continue_file.write('write_data output/SEQUENCE_prolong.data\n')
     continue_file.close()
@@ -605,6 +626,17 @@ def calculate_trajectory_contacts(traj_path: str) -> list:
     return contacts
 
 
+def get_diffusivity(timestamps: list[float],
+                    gyrations_concatenated: list[float]) -> float:
+    """Calculate diffusivity from three-dimensional diffusion equation
+       R^2 = 6Dt."""
+
+    D = linregress(np.array(timestamps),
+                   np.array(gyrations_concatenated)**2 / 6)
+
+    return D.slope, D.intercept
+
+
 def analyse(args):
     """Calculate statistics for all available simulations.
 
@@ -629,166 +661,422 @@ def analyse(args):
         32: '#880d1e'
     }
 
-    dir = '/Users/egor/Desktop/scripts_results/LazyPhase/examples/stickers_spacers/'
+    dir = 'examples/stickers_spacers/'
 
     # Calculate clustering scales, if asked.
     if cluster_flag:
-        for block_length in [1, 2, 4, 8, 16, 32]:
-            print('Block length ' + str(block_length) + '.')
+        block_slopes_dict = dict()
 
-            clusts_pool = []
+        for bead_types in [[1, 2, 3], [1], [2], [3]]:
+            bead_types_str = ''.join([str(bead_type) \
+                                      for bead_type in bead_types])
 
-            for n in range(1, 10+1):
-                print('Simulation number ' + str(n) + '.')
+            print('@@@@@@@@')
+            print('Bead types ' \
+                  + ', '.join([str(bead_type) for bead_type in bead_types]) \
+                  + '.')
+            print('@@@@@@@@')
 
-                cluster_file = open(dir + 'statistics/cluster_' + ('S' * block_length + 'L' * block_length) * (64 // (block_length * 2)) + '_' + str(n) + '.txt', 'w')
+            block_slopes = []
 
-                # Read all beads from a .data file to calculate their
-                # clustering on different scales.
-                beads = read_beads_from_LAMMPS_data(
-                    dir + 'output/' + ('S' * block_length + 'L' * block_length) * (64 // (block_length * 2)) + '_' + str(n) + '.data'
+            for block_length in [1, 2, 4, 8, 16, 32]:
+                print('#### Block length ' + str(block_length) + '. ####')
+
+                clusts_pool = []
+
+                for n in range(1, 10+1):
+                    print('Simulation number ' + str(n) + '.')
+
+                    if calculate_flag:
+                        cluster_file = open(dir + 'statistics/cluster_' \
+                                                + bead_types_str + '_' \
+                                                + ('S' * block_length \
+                                                + 'L' * block_length) \
+                                                * (64 // (block_length * 2)) \
+                                                + '_' + str(n) + '.txt', 'w')
+
+                        # Read all beads from a .data file to calculate their
+                        # clustering on different scales.
+                        beads = read_beads_from_LAMMPS_data(
+                            dir + 'output/' \
+                                + ('S' * block_length + 'L' * block_length) \
+                                * (64 // (block_length * 2)) + '_' + str(n) \
+                                + '.data'
+                        )
+
+                        Rs, clusts = np.logspace(0, 2, 10), []
+
+                        for R in Rs:
+                            print('Radius ' + str(R) + ' Å.')
+                            c = clustering(beads, R, 27, bead_types)
+                            clusts.append(c)
+                            cluster_file.write(str(R) + ' ' + str(c) + '\n')
+
+                        cluster_file.close()
+                    else:
+                        cluster_file = open(
+                            dir + 'statistics/cluster_' \
+                                + bead_types_str + '_' \
+                                + ('S' * block_length + 'L' * block_length) \
+                                * (64 // (block_length * 2)) + '_' + str(n) \
+                                + '.txt', 'r')
+                        clustering_lines = cluster_file.readlines()
+                        cluster_file.close()
+
+                        Rs, clusts = [], []
+                        for line in clustering_lines:
+                            tokens = line.strip().split()
+                            Rs.append(float(tokens[0]))
+                            clusts.append(float(tokens[1]))
+
+                    clusts_pool.append(clusts)
+
+                # Calculate and plot the average clusterings.
+
+                clusts_averaged, std_lower, std_upper = [], [], []
+
+                for i in range(len(clusts)):
+                    sum_at_distance = sum(
+                        [clusts_pool[n][i] for n in range(10)]
+                    )
+                    std = np.std([clusts_pool[n][i] for n in range(10)])
+                    clusts_averaged.append(sum_at_distance / 10)
+                    std_lower.append(sum_at_distance / 10 - std)
+                    std_upper.append(sum_at_distance / 10 + std)
+
+                min_idx = 0
+                while clusts_averaged[min_idx] == 0:
+                    min_idx += 1
+
+                plot.plot(Rs[min_idx:], clusts_averaged[min_idx:],
+                          color=block_length_colors[block_length], alpha=0.5,
+                          zorder=-1)
+
+                clust_slope = linregress(
+                    np.log(Rs[min_idx+1:]), np.log(clusts_averaged[min_idx+1:])
+                ).slope
+
+                block_slopes.append(clust_slope)
+
+                #plot.fill_between(Rs, std_lower, std_upper,
+                #                  color=block_length_colors[block_length],
+                #                  alpha=0.25)
+
+                plot.scatter(
+                    Rs[min_idx:], clusts_averaged[min_idx:],
+                    color=block_length_colors[block_length], alpha=1.0,
+                    label=str(block_length)
                 )
 
-                Rs, clusts = np.arange(20, 200, 20), []
-                for R in Rs:
-                    print('Radius ' + str(R) + ' Å.')
-                    clusts.append(clustering(beads, R, 27, 64 * 2))
+            plot.xscale('log')
+            plot.yscale('log')
+            plot.xlabel('R (Å)', fontsize=16)
+            plot.ylabel('Clustering coefficient', fontsize=16)
+            plot.legend(title='Block length', fontsize=16, title_fontsize=16)
+            plot.tight_layout()
+            plot.savefig('clustering_' + bead_types_str + '.png')
+            plot.clf()
 
-                clusts_pool.append(clusts)
+            block_slopes_dict[tuple(bead_types)] = block_slopes
 
-                cluster_file.close()
+        bead_types_names = {
+            (1,): 'Backbone',
+            (2,): 'Small',
+            (3,): 'Large',
+            (1,2,3,): 'All'
+        }
 
-            clusts_averaged, std_lower, std_upper = [], [], []
+        bead_types_colors = {
+            (1,): '#9e2a2b',
+            (2,): '#335c67',
+            (3,): '#e09f3e',
+            (1,2,3,): '#001219'
+        }
 
-            for i in range(len(clusts)):
-                sum_at_distance = sum([clusts_pool[n][i] for n in range(10)])
-                std = np.std([clusts_pool[n][i] for n in range(10)])
-                clusts_averaged.append(sum_at_distance / 10)
-                std_lower.append(sum_at_distance / 10 - std)
-                std_upper.append(sum_at_distance / 10 + std)
+        plot.xscale('linear')
+        plot.yscale('linear')
 
-            plot.plot(np.log(Rs), np.log(clusts_averaged),
-                      color=block_length_colors[block_length], alpha=0.5,
-                      label=str(block_length))
+        for bead_types in block_slopes_dict:
+            block_slopes = block_slopes_dict[bead_types]
 
-            #plot.fill_between(Rs, std_lower, std_upper,
-            #                  color=block_length_colors[block_length],
-            #                  alpha=0.25)
+            plot.plot(
+                [1, 2, 4, 8, 16, 32], block_slopes,
+                color=bead_types_colors[bead_types],
+                zorder=sum(bead_types)
+            )
 
-        plot.xlabel('R (Å)', fontsize=16)
-        plot.ylabel('C(R)', fontsize=16)
-        plot.legend(title='Block length', fontsize=16, title_fontsize=16)
+            plot.scatter(
+                [1, 2, 4, 8, 16, 32], block_slopes,
+                label=bead_types_names[bead_types],
+                color=bead_types_colors[bead_types],
+                zorder=sum(bead_types)
+            )
+
+        plot.xticks([1, 2, 4, 8, 16, 32], fontsize=12)
+        plot.yticks(fontsize=12)
+        plot.xlabel('Block length', fontsize=16)
+        plot.ylabel('Slope', fontsize=16)
+        plot.legend(fontsize=16)
         plot.tight_layout()
-        plot.savefig('clustering.png')
+        plot.savefig('clustering_slopes.png')
+        plot.clf()
 
     # Calculate radii of gyration, if asked.
     if gyration_flag:
-        timestamps = np.array([i for i in range(301 + 1001 - 1)],
-                              dtype=float) / 10.0
+        if calculate_flag:
+            print('Calculating the radii of gyration...')
 
-        for n in range(1, 10+1):
-            gyrations = calculate_trajectory_gyrations(
-                dir + 'output/' + 'SL' * 32 + '_' + str(n) + '.lammpstrj'
-            )
-            gyrations_prolong = calculate_trajectory_gyrations(
-                dir + 'output/' + 'SL' * 32 + '_' + str(n) + '_prolong.lammpstrj'
+            for block_length in [1, 2, 4, 8, 16, 32]:
+                print('---- Block length ' + str(block_length) + '. ----')
 
-            )
+                for n in range(1, 10+1):
+                    print('n = ' + str(n))
 
-            if n == 1:
-                label = '1'
-            else:
-                label = None
-            #plot.scatter(timestamps[200:], gyrations[200:], label=label,
-            #             color='#81b29a', alpha=0.5)
-            plot.plot(timestamps[200:], (gyrations + gyrations_prolong[1:])[200:], color='#81b29a', label=label)
+                    seq = ('S' * block_length + 'L' * block_length) \
+                          * (64 // (block_length * 2))
 
-        for n in range(1, 10+1):
-            gyrations = calculate_trajectory_gyrations(dir + 'output/' + ('S' * 2 + 'L' * 2) * 16 + '_' + str(n) + '.lammpstrj')
-            gyrations_prolong = calculate_trajectory_gyrations(dir + 'output/' + ('S' * 2 + 'L' * 2) * 16 + '_' + str(n) + '_prolong.lammpstrj')
-            if n == 1:
-                label = '2'
-            else:
-                label = None
+                    statistics_report_file = open(
+                        dir + 'statistics/gyration_' + seq + '_' + str(n) \
+                            + '.txt', 'w'
+                    )
 
-            #plot.scatter(timestamps[200:], gyrations[200:], label=label,
-            #             color='#e07a5f', alpha=0.5)
-            plot.plot(timestamps[200:],
-                      (gyrations + gyrations_prolong[1:])[200:],
-                      color='#e07a5f', label=label)
+                    gyrations = calculate_trajectory_gyrations(
+                        dir + 'output/' + seq + '_' + str(n) + '.lammpstrj'
+                    )
 
-        plot.xlabel('Time (ns)', fontsize=16)
-        plot.ylabel('Radius of gyration (Å)', fontsize=16)
-        plot.legend(title='Block length', fontsize=16, title_fontsize=16)
-        plot.tight_layout()
-        plot.savefig('fig.png')
+                    gyrations_prolong = calculate_trajectory_gyrations(
+                        dir + 'output/' + seq + '_' + str(n) \
+                            + '_prolong.lammpstrj'
+                    )
 
-    # Calculate contact statistics, if asked.
-    if contacts_flag:
-        #for n in range(1, 10+1):
-        #    trajectory_contacts_nucleus = calculate_trajectory_contacts('examples/stickers_spacers/output/' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '.lammpstrj')
-        #    trajectory_contacts_prolong = calculate_trajectory_contacts('examples/stickers_spacers/output/' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '_prolong.lammpstrj')[1:]
-        #    trajectory_contacts = trajectory_contacts_nucleus + trajectory_contacts_prolong
+                    gyrations_concatenated = (gyrations + gyrations_prolong[1:])
 
-        #    statistics_report_file = open('examples/stickers_spacers/statistics/contacts_' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '.txt', 'w')
+                    for gyration in gyrations_concatenated:
+                        statistics_report_file.write(str(gyration) + '\n')
 
-        #    for contacts in trajectory_contacts:
-        #        statistics_report_file.write(str(contacts) + '\n')
-
-        #    statistics_report_file.close()
+                    statistics_report_file.close()
 
         timestamps = np.array([i for i in range(301 + 1001 - 1)],
                               dtype=float) / 10.0
+
+        print('Plotting the radii of gyration...')
 
         for block_length in [1, 2, 4, 8, 16, 32]:
+            print('---- Block length ' + str(block_length) + '. ----')
+
+            D_1_list, D_bias_list = [], []
+
             for n in range(1, 10+1):
-                statistics_report_file = open(dir + 'statistics/contacts_' + ('S' * block_length + 'L' * block_length) * (64 // (2 * block_length)) + '_' + str(n) + '.txt', 'r')
+                print('n = ' + str(n))
+
+                seq_1 = ('S' * 1 + 'L' * 1) * (64 // (1 * 2))
+
+                statistics_report_file = open(
+                    dir + 'statistics/gyration_' + seq_1 + '_' + str(n) \
+                        + '.txt', 'r'
+                )
                 statistics_lines = statistics_report_file.readlines()
                 statistics_report_file.close()
 
-                statistics_states = []
-                for line in statistics_lines[301:]:
-                    contacts_dict = ast.literal_eval(line)
-                    # L L
-                    #statistics_states.append(int(line.strip()[1:-1].split(':')[-1].strip()))
-                    # S S
-                    statistics_states.append(contacts_dict[(2,3)])
+                gyrations_concatenated = [
+                    float(line.strip()) for line in statistics_lines
+                ]
+
+                D_1, D_bias = get_diffusivity(timestamps[200:],
+                                              gyrations_concatenated[200:])
+
+                D_1_list.append(D_1)
+                D_bias_list.append(D_bias)
+
+                if n == 1:
+                    label = '1'
+                else:
+                    label = None
+
+                #plot.scatter(timestamps[200:], gyrations[200:], label=label,
+                #             color='#81b29a', alpha=0.5)
+                plot.plot(timestamps[200:], gyrations_concatenated[200:],
+                          color='#81b29a', alpha=0.5, label=label, zorder=0)
+
+            plot.plot(
+                timestamps[200:],
+                np.sqrt(6 * (np.mean(D_bias_list) + np.mean(D_1_list) \
+                          * np.array(timestamps[200:]))),
+                color='#31572c', linestyle='-', zorder=1, linewidth=2
+            )
+
+            D_list, D_bias_list = [], []
+
+            for n in range(1, 10+1):
+                seq = ('S' * block_length + 'L' * block_length) \
+                      * (64 // (block_length * 2))
+
+                statistics_report_file = open(
+                    dir + 'statistics/gyration_' + seq + '_' + str(n) + '.txt',
+                    'r'
+                )
+                statistics_lines = statistics_report_file.readlines()
+                statistics_report_file.close()
+
+                gyrations_concatenated = [
+                    float(line.strip()) for line in statistics_lines
+                ]
+
+                D, D_bias = get_diffusivity(timestamps[200:],
+                                            gyrations_concatenated[200:])
+
+                D_list.append(D)
+                D_bias_list.append(D_bias)
 
                 if n == 1:
                     label = str(block_length)
                 else:
                     label = None
 
-                plot.plot(timestamps[301:], statistics_states, label=label, color=block_length_colors[block_length], alpha=0.5)
+                #plot.scatter(timestamps[200:], gyrations[200:], label=label,
+                #             color='#e07a5f', alpha=0.5)
+                plot.plot(timestamps[200:], gyrations_concatenated[200:],
+                          color='#e07a5f', alpha=0.5, label=label, zorder=0)
 
-        plot.xlabel('Time (ns)', fontsize=16)
-        plot.ylabel('Number of contacts', fontsize=16)
-        plot.legend(title='Block length', fontsize=16, title_fontsize=16)
-        plot.tight_layout()
-        plot.savefig('contacts_B_L.png')
+            plot.plot(
+                timestamps[200:],
+                np.sqrt(6 * (np.mean(D_bias_list) + np.mean(D_list) \
+                          * np.array(timestamps[200:]))),
+                color='#bc4749', linestyle='-', zorder=1, linewidth=2
+            )
 
-    print('Preparing report on simulations...')
+            plot.xlabel('Time (ns)', fontsize=16)
+            plot.ylabel('Radius of gyration (Å)', fontsize=16)
+            plot.legend(title='Block length', fontsize=16, title_fontsize=16)
+            plot.tight_layout()
+            plot.savefig('gyration_' + str(seq) + '.png')
+            plot.clf()
 
-    dir_path = Path(args.dir)
+    # Calculate contact statistics, if asked.
+    if contacts_flag:
+        #if calculate_flag:
+            #for n in range(1, 10+1):
+            #    trajectory_contacts_nucleus = calculate_trajectory_contacts('examples/stickers_spacers/output/' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '.lammpstrj')
+            #    trajectory_contacts_prolong = calculate_trajectory_contacts('examples/stickers_spacers/output/' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '_prolong.lammpstrj')[1:]
+            #    trajectory_contacts = trajectory_contacts_nucleus + trajectory_contacts_prolong
 
-    if dir_path.is_dir():
-        print('Report directory already exists.')
-    else:
-        dir_path.mkdir(parents=False, exist_ok=False)
-        print('Report directory created.')
+            #    statistics_report_file = open('examples/stickers_spacers/statistics/contacts_' + ('S' * 32 + 'L' * 32) * 1 + '_' + str(n) + '.txt', 'w')
 
-    report = dict()
+            #    for contacts in trajectory_contacts:
+            #        statistics_report_file.write(str(contacts) + '\n')
 
-    seqs = {'SL' * 32, 'SSLL' * 16}
+            #    statistics_report_file.close()
 
-    for seq in seqs:
-        report[seq] = dict()
+        print('Plotting contacts...')
+
+        timestamps = np.array([i for i in range(301 + 1001 - 1)],
+                              dtype=float) / 10.0
+
+        bead_type_name_dict = {
+            1: 'B',
+            2: 'S',
+            3: 'L'
+        }
+
+        for bead_type_1 in range(1, 3+1):
+            for bead_type_2 in range(bead_type_1, 3+1):
+                bead_type_name_1 = bead_type_name_dict[bead_type_1]
+                bead_type_name_2 = bead_type_name_dict[bead_type_2]
+
+                print('### Bead types ' + bead_type_name_1 + ' and ' \
+                                        + bead_type_name_2 + '. ###')
+
+                for block_length in [1, 2, 4, 8, 16, 32]:
+                    print('---- Block length ' + str(block_length) + '. ----')
+
+                    seq = ('S' * block_length + 'L' * block_length) \
+                          * (64 // (2 * block_length))
+
+                    block_statistics_states = []
+
+                    label = str(block_length)
+
+                    for n in range(1, 10+1):
+                        print('n = ' + str(n))
+
+                        statistics_report_file = open(
+                            dir + 'statistics/contacts_' + seq + '_' + str(n) \
+                                + '.txt', 'r'
+                        )
+                        statistics_lines = statistics_report_file.readlines()
+                        statistics_report_file.close()
+
+                        statistics_states = []
+                        for line in statistics_lines[301:]:
+                            contacts_dict = ast.literal_eval(line)
+                            statistics_states.append(
+                                contacts_dict[(bead_type_1, bead_type_2)]
+                            )
+
+                        #if n == 1:
+                        #    label = str(block_length)
+                        #else:
+                        #    label = None
+
+                        block_statistics_states.append(statistics_states)
+
+                    maxima = [max(col) for col in zip(*block_statistics_states)]
+                    minima = [min(col) for col in zip(*block_statistics_states)]
+                    means  = [sum(col) / len(col) \
+                              for col in zip(*block_statistics_states)]
+
+                    plot.plot(timestamps[301:], maxima,
+                              label=label,
+                              color=block_length_colors[block_length],
+                              alpha=0.5)
+
+                    plot.plot(timestamps[301:], minima,
+                              color=block_length_colors[block_length],
+                              alpha=0.5)
+
+                    plot.plot(timestamps[301:], means,
+                              color=block_length_colors[block_length])
+
+                    #for statistics_states in block_statistics_states:
+                    #    plot.plot(timestamps[301:], statistics_states,
+                    #              color=block_length_colors[block_length],
+                    #              linestyle='--', alpha=0.1)
+
+                    plot.fill_between(timestamps[301:], minima, maxima,
+                                      color=block_length_colors[block_length],
+                                      alpha=0.1)
+
+                plot.xlabel('Time (ns)', fontsize=16)
+                plot.ylabel('Number of contacts', fontsize=16)
+                plot.legend(title='Block length',
+                            fontsize=16, title_fontsize=16)
+                plot.tight_layout()
+                plot.savefig('contacts_' + str(bead_type_name_1) + '_' \
+                                         + str(bead_type_name_2) + '.png')
+                plot.clf()
+
+    #print('Preparing report on simulations...')
+
+    #dir_path = Path(args.dir)
+
+    #if dir_path.is_dir():
+    #    print('Report directory already exists.')
+    #else:
+    #    dir_path.mkdir(parents=False, exist_ok=False)
+    #    print('Report directory created.')
+
+    #report = dict()
+
+    #seqs = {'SL' * 32, 'SSLL' * 16}
+
+    #for seq in seqs:
+        #report[seq] = dict()
         #report[seq]['contacts'] = count_contacts()
         #report[seq]['R_gyr'] = radius_of_gyration()
         #report[seq]['clustering'] = clustering()
 
     # To use as an importable module.
-    return report
+    #return report
 
 
 def read_beads_from_LAMMPS_data(path: str) -> \
@@ -808,12 +1096,13 @@ def read_beads_from_LAMMPS_data(path: str) -> \
             read_atoms = True
 
         if read_atoms:  # If the current section is atoms, read atomic params.
-            tokens = line.split()
+            tokens = line.strip().split()
 
             if len(tokens) == 10:
                 molecule_id = int(tokens[1])
+                bead_type = int(tokens[2])
                 x, y, z = float(tokens[4]), float(tokens[5]), float(tokens[6])
-                beads.append((molecule_id, x, y, z))
+                beads.append((molecule_id, bead_type, x, y, z))
 
         if 'Velocities' in line:  # Atom section ended.
             break

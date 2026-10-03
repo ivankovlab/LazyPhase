@@ -1,4 +1,4 @@
-# The target directory for the simulations must be passed to this scripts.
+# The target directory for the simulations must be passed to this script.
 DIR="$1"
 
 # Save the current path.

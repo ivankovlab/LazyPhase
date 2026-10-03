@@ -1,6 +1,7 @@
 # The target directory.
 DIR="$1"
-# LAMMPS running rules.
+
+# LAMMPS run setup.
 LMP="$2"
 
 # Save the current path.
